@@ -65,8 +65,8 @@ func applyAuthorizationWebhookConfiguration(deployment *appsv1.Deployment, confi
 
 	// DEPRECATED: keep support for the deprecated .spec.webhook.allowPaths field for now
 	// to not break existing shard installations.
-	if config.AllowPaths != nil {
-		extraArgs = append(extraArgs, fmt.Sprintf("--authorization-always-allow-paths=%s", strings.Join(*config.AllowPaths, ",")))
+	if config.AllowPaths != nil { //nolint:staticcheck
+		extraArgs = append(extraArgs, fmt.Sprintf("--authorization-always-allow-paths=%s", strings.Join(*config.AllowPaths, ","))) //nolint:staticcheck
 	}
 
 	if val := config.CacheAuthorizedTTL; val != nil {
