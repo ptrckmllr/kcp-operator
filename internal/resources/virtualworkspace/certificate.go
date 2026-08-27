@@ -22,9 +22,9 @@ import (
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	certmanagermetav1 "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
 
-	"github.com/kcp-dev/kcp-operator/internal/reconciling"
 	"github.com/kcp-dev/kcp-operator/internal/resources"
 	"github.com/kcp-dev/kcp-operator/internal/resources/utils"
+	"github.com/kcp-dev/kcp-operator/pkg/reconciling"
 	operatorv1alpha1 "github.com/kcp-dev/kcp-operator/sdk/apis/operator/v1alpha1"
 )
 
@@ -32,7 +32,7 @@ func commonName(vw *operatorv1alpha1.VirtualWorkspace) string {
 	return fmt.Sprintf("%s-virtual-workspace", vw.Name)
 }
 
-func ClientCertificateReconciler(vw *operatorv1alpha1.VirtualWorkspace, issuerName string) reconciling.NamedCertificateReconcilerFactory {
+func ClientCertificateReconciler(vw *operatorv1alpha1.VirtualWorkspace, rootShard *operatorv1alpha1.RootShard) reconciling.NamedCertificateReconcilerFactory {
 	const certKind = operatorv1alpha1.ClientCertificate
 
 	template := vw.Spec.CertificateTemplates.CertificateTemplate(certKind)
@@ -45,6 +45,7 @@ func ClientCertificateReconciler(vw *operatorv1alpha1.VirtualWorkspace, issuerNa
 				SecretName: name,
 				SecretTemplate: &certmanagerv1.CertificateSecretTemplate{
 					Labels: map[string]string{
+						resources.RootShardLabel:        rootShard.Name,
 						resources.VirtualWorkspaceLabel: vw.Name,
 					},
 				},
@@ -69,7 +70,7 @@ func ClientCertificateReconciler(vw *operatorv1alpha1.VirtualWorkspace, issuerNa
 				},
 
 				IssuerRef: certmanagermetav1.IssuerReference{
-					Name:  issuerName,
+					Name:  resources.GetRootShardCAName(rootShard, operatorv1alpha1.ClientCA),
 					Kind:  "Issuer",
 					Group: "cert-manager.io",
 				},
@@ -93,6 +94,7 @@ func ServerCertificateReconciler(vw *operatorv1alpha1.VirtualWorkspace, rootShar
 				SecretName: name,
 				SecretTemplate: &certmanagerv1.CertificateSecretTemplate{
 					Labels: map[string]string{
+						resources.RootShardLabel:        rootShard.Name,
 						resources.VirtualWorkspaceLabel: vw.Name,
 					},
 				},

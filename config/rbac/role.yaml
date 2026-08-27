@@ -10,7 +10,6 @@ rules:
   - deployments
   verbs:
   - create
-  - delete
   - get
   - list
   - patch
@@ -33,8 +32,18 @@ rules:
   - ""
   resources:
   - configmaps
-  - secrets
   - services
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - secrets
   verbs:
   - create
   - delete
@@ -44,9 +53,44 @@ rules:
   - update
   - watch
 - apiGroups:
+  - deploy.operator.kcp.io
+  resources:
+  - compiledcacheservers
+  - compiledfrontproxies
+  - compiledrootshards
+  - compiledshards
+  - compiledvirtualworkspaces
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - deploy.operator.kcp.io
+  resources:
+  - compiledcacheservers/finalizers
+  - compiledfrontproxies/finalizers
+  - compiledrootshards/finalizers
+  - compiledshards/finalizers
+  - compiledvirtualworkspaces/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - deploy.operator.kcp.io
+  resources:
+  - compiledfrontproxies/status
+  - compiledrootshards/status
+  - compiledshards/status
+  - compiledvirtualworkspaces/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
   - operator.kcp.io
   resources:
-  - bundles
   - cacheservers
   - frontproxies
   verbs:
@@ -60,7 +104,6 @@ rules:
 - apiGroups:
   - operator.kcp.io
   resources:
-  - bundles/finalizers
   - cacheservers/finalizers
   - frontproxies/finalizers
   - kubeconfigs/finalizers
@@ -71,7 +114,6 @@ rules:
 - apiGroups:
   - operator.kcp.io
   resources:
-  - bundles/status
   - cacheservers/status
   - frontproxies/status
   - kubeconfigs/status

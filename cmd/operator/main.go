@@ -31,6 +31,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/apimachinery/pkg/util/sets"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -39,18 +40,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
+	mcmanager "sigs.k8s.io/multicluster-runtime/pkg/manager"
 
-	"github.com/kcp-dev/kcp-operator/internal/config"
-	"github.com/kcp-dev/kcp-operator/internal/controller/bundle"
-	"github.com/kcp-dev/kcp-operator/internal/controller/cacheserver"
-	"github.com/kcp-dev/kcp-operator/internal/controller/frontproxy"
-	"github.com/kcp-dev/kcp-operator/internal/controller/kubeconfig"
-	kubeconfigrbac "github.com/kcp-dev/kcp-operator/internal/controller/kubeconfig-rbac"
-	"github.com/kcp-dev/kcp-operator/internal/controller/rootshard"
-	"github.com/kcp-dev/kcp-operator/internal/controller/shard"
-	"github.com/kcp-dev/kcp-operator/internal/controller/virtualworkspace"
-	"github.com/kcp-dev/kcp-operator/internal/metrics"
-	"github.com/kcp-dev/kcp-operator/internal/reconciling"
+	operatorclient "github.com/kcp-dev/kcp-operator/pkg/client"
+	"github.com/kcp-dev/kcp-operator/pkg/config"
+	"github.com/kcp-dev/kcp-operator/pkg/controller"
+	"github.com/kcp-dev/kcp-operator/pkg/metrics"
+	"github.com/kcp-dev/kcp-operator/pkg/reconciling"
+	deployv1alpha1 "github.com/kcp-dev/kcp-operator/sdk/apis/deploy/v1alpha1"
 	operatorv1alpha1 "github.com/kcp-dev/kcp-operator/sdk/apis/operator/v1alpha1"
 )
 
@@ -63,6 +60,7 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
 	utilruntime.Must(operatorv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(deployv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(certmanagerv1.AddToScheme(scheme))
 	utilruntime.Must(kcpcorev1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
@@ -82,6 +80,7 @@ func run(ctx context.Context) error {
 		metricsAddr, probeAddr                           string
 		enableLeaderElection, secureMetrics, enableHTTP2 bool
 		tlsOpts                                          []func(*tls.Config)
+		enabledControllerGroups                          []string
 	)
 
 	// Create pflag set and bind to standard flag set
@@ -97,6 +96,9 @@ func run(ctx context.Context) error {
 		"If set, the metrics endpoint is served securely via HTTPS. Use --metrics-secure=false to use HTTP instead.")
 	fs.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
+	fs.StringSliceVar(&enabledControllerGroups, "enabled-controller-groups",
+		[]string{string(config.ControllerGroupConfig), string(config.ControllerGroupWorkload)},
+		"Comma-separated list of controller groups to enable (available: config, workload).")
 
 	// Add feature gates flag
 	config.DefaultMutableFeatureGate.AddFlag(fs)
@@ -117,6 +119,12 @@ func run(ctx context.Context) error {
 
 	// Log enabled feature gates
 	setupLog.Info("Feature gates", "gates", config.DefaultFeatureGate)
+
+	controllerGroups, err := config.ParseControllerGroups(enabledControllerGroups)
+	if err != nil {
+		return fmt.Errorf("invalid --enabled-controller-groups: %w", err)
+	}
+	setupLog.Info("Enabled controller groups", "groups", sets.List(controllerGroups))
 
 	log := zap.NewRaw(zap.UseFlagOptions(&opts))
 	ctrl.SetLogger(zapr.NewLogger(log))
@@ -165,7 +173,7 @@ func run(ctx context.Context) error {
 		metricsServerOptions.FilterProvider = filters.WithAuthenticationAndAuthorization
 	}
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	mgr, err := mcmanager.New(ctrl.GetConfigOrDie(), nil, ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsServerOptions,
 		WebhookServer:          webhookServer,
@@ -188,64 +196,26 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("unable to start manager: %w", err)
 	}
 
-	client := mgr.GetClient()
-
-	if err = (&rootshard.RootShardReconciler{
-		Client: client,
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		return fmt.Errorf("unable to create controller %s: %w", "RootShard", err)
-	}
-	if err = (&frontproxy.FrontProxyReconciler{
-		Client: client,
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		return fmt.Errorf("unable to create controller %s: %w", "FrontProxy", err)
-	}
-	if err = (&shard.ShardReconciler{
-		Client: client,
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		return fmt.Errorf("unable to create controller %s: %w", "Shard", err)
-	}
-	if err = (&cacheserver.CacheServerReconciler{
-		Client: client,
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		return fmt.Errorf("unable to create controller %s: %w", "CacheServer", err)
-	}
-	if err = (&kubeconfig.KubeconfigReconciler{
-		Client: client,
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		return fmt.Errorf("unable to create controller %s: %w", "Kubeconfig", err)
-	}
-	if err = (&virtualworkspace.Reconciler{
-		Client: client,
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		return fmt.Errorf("unable to create controller %s: %w", "VirtualWorkspace", err)
-	}
-	if config.Enabled(config.ConfigurationBundle) {
-		if err = (&bundle.BundleReconciler{
-			Client: client,
-			Scheme: mgr.GetScheme(),
-		}).SetupWithManager(mgr); err != nil {
-			return fmt.Errorf("unable to create controller %s: %w", "Bundle", err)
+	if controllerGroups.Has(config.ControllerGroupConfig) {
+		if err := controller.AddConfigControllers(
+			mgr,
+			controller.Options{
+				Address: operatorclient.InCluster{},
+			},
+		); err != nil {
+			return err
 		}
 	}
-	if err = (&kubeconfigrbac.KubeconfigRBACReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "KubeconfigRBAC")
-		os.Exit(1)
+	if controllerGroups.Has(config.ControllerGroupWorkload) {
+		if err := controller.AddWorkloadControllers(mgr, controller.Options{}); err != nil {
+			return err
+		}
 	}
 	// +kubebuilder:scaffold:builder
 
 	metrics.RegisterMetrics()
 
-	metricsCollector := metrics.NewMetricsCollector(mgr.GetClient())
+	metricsCollector := metrics.NewMetricsCollector(mgr.GetLocalManager().GetClient())
 	go metricsCollector.Start(ctx)
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {

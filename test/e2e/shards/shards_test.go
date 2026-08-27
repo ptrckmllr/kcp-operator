@@ -33,26 +33,32 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrlruntime "sigs.k8s.io/controller-runtime"
 
-	resources "github.com/kcp-dev/kcp-operator/internal/resources"
 	operatorv1alpha1 "github.com/kcp-dev/kcp-operator/sdk/apis/operator/v1alpha1"
 	"github.com/kcp-dev/kcp-operator/test/utils"
 )
 
 func TestCreateShard(t *testing.T) {
+	// TODO: Same limitation as TestProvisionFrontProxyRBAC. Deleting the Shard runs a
+	// finalizer that deregisters it through the kcp API, which the config controllers
+	// reach at <svc>.<ns>.svc.cluster.local - unresolvable from the config cluster once
+	// kcp runs on the workload one.
+	utils.SkipUnlessTopology(t, utils.TopologySingle)
+
 	ctrlruntime.SetLogger(logr.Discard())
 
-	client := utils.GetKubeClient(t)
+	configClient := utils.GetConfigKubeClient(t)
+	workloadClient := utils.GetWorkloadKubeClient(t)
 	ctx := context.Background()
 
 	// create namespace
-	namespace := utils.CreateSelfDestructingNamespace(t, ctx, client, "create-shard")
+	namespace := utils.CreateSelfDestructingNamespace(t, ctx, configClient, "create-shard")
 
 	// deploy a root shard incl. etcd
-	rootShard := utils.DeployRootShard(ctx, t, client, namespace.Name, "")
+	rootShard := utils.DeployRootShard(ctx, t, configClient, workloadClient, namespace.Name, "")
 
 	// deploy a 2nd shard incl. etcd
 	shardName := "aadvark"
-	utils.DeployShard(ctx, t, client, namespace.Name, shardName, rootShard.Name)
+	utils.DeployShard(ctx, t, configClient, workloadClient, namespace.Name, shardName, rootShard.Name)
 
 	// create a kubeconfig to access the root shard
 	configSecretName := fmt.Sprintf("%s-shard-kubeconfig", rootShard.Name)
@@ -76,13 +82,13 @@ func TestCreateShard(t *testing.T) {
 	}
 
 	t.Log("Creating kubeconfig for RootShard...")
-	if err := client.Create(ctx, &rsConfig); err != nil {
+	if err := configClient.Create(ctx, &rsConfig); err != nil {
 		t.Fatal(err)
 	}
-	utils.WaitForObject(t, ctx, client, &corev1.Secret{}, types.NamespacedName{Namespace: rsConfig.Namespace, Name: rsConfig.Spec.SecretRef.Name})
+	utils.WaitForObject(t, ctx, configClient, &corev1.Secret{}, types.NamespacedName{Namespace: rsConfig.Namespace, Name: rsConfig.Spec.SecretRef.Name})
 
 	t.Log("Connecting to RootShard...")
-	rootShardClient := utils.ConnectWithKubeconfig(t, ctx, client, namespace.Name, rsConfig.Name, logicalcluster.None)
+	rootShardClient := utils.ConnectWithKubeconfig(t, ctx, configClient, namespace.Name, rsConfig.Name, logicalcluster.None)
 
 	// wait until the 2nd shard has registered itself successfully at the root shard
 	shardKey := types.NamespacedName{Name: shardName}
@@ -111,13 +117,13 @@ func TestCreateShard(t *testing.T) {
 	}
 
 	t.Log("Creating kubeconfig for Shard...")
-	if err := client.Create(ctx, &shardConfig); err != nil {
+	if err := configClient.Create(ctx, &shardConfig); err != nil {
 		t.Fatal(err)
 	}
-	utils.WaitForObject(t, ctx, client, &corev1.Secret{}, types.NamespacedName{Namespace: shardConfig.Namespace, Name: shardConfig.Spec.SecretRef.Name})
+	utils.WaitForObject(t, ctx, configClient, &corev1.Secret{}, types.NamespacedName{Namespace: shardConfig.Namespace, Name: shardConfig.Spec.SecretRef.Name})
 
 	t.Log("Connecting to Shard...")
-	kcpClient := utils.ConnectWithKubeconfig(t, ctx, client, namespace.Name, shardConfig.Name, logicalcluster.None)
+	kcpClient := utils.ConnectWithKubeconfig(t, ctx, configClient, namespace.Name, shardConfig.Name, logicalcluster.None)
 
 	// proof of life: list something every logicalcluster in kcp has
 	t.Log("Should be able to list Secrets.")
@@ -129,11 +135,11 @@ func TestCreateShard(t *testing.T) {
 	// Test cleanup: delete the operator's Shard CR and verify the kcp Shard object is cleaned up
 	t.Log("Deleting operator Shard CR...")
 	shard := &operatorv1alpha1.Shard{}
-	if err := client.Get(ctx, types.NamespacedName{Namespace: namespace.Name, Name: shardName}, shard); err != nil {
+	if err := configClient.Get(ctx, types.NamespacedName{Namespace: namespace.Name, Name: shardName}, shard); err != nil {
 		t.Fatalf("Failed to get Shard: %v", err)
 	}
 	t.Logf("Shard finalizers before delete: %v", shard.Finalizers)
-	if err := client.Delete(ctx, shard); err != nil {
+	if err := configClient.Delete(ctx, shard); err != nil {
 		t.Fatalf("Failed to delete Shard: %v", err)
 	}
 
@@ -142,188 +148,4 @@ func TestCreateShard(t *testing.T) {
 	t.Log("Waiting for kcp Shard to be deleted from root shard...")
 	utils.WaitForObjectDeletion(t, ctx, rootShardClient, &kcpcorev1alpha1.Shard{}, shardKey)
 	t.Log("kcp Shard has been deleted from root shard, cleanup was successful.")
-}
-
-func TestShardBundleAnnotation(t *testing.T) {
-	ctrlruntime.SetLogger(logr.Discard())
-
-	client := utils.GetKubeClient(t)
-	ctx := context.Background()
-
-	// create namespace
-	namespace := utils.CreateSelfDestructingNamespace(t, ctx, client, "shard-bundle-annotation")
-
-	// deploy a root shard incl. etcd
-	rootShard := utils.DeployRootShard(ctx, t, client, namespace.Name, "")
-
-	// deploy a shard without bundle annotation first
-	shardName := "annotated-shard"
-	t.Log("Deploying Shard without bundle annotation...")
-	shard := utils.DeployShard(ctx, t, client, namespace.Name, shardName, rootShard.Name)
-
-	// verify no bundle exists yet
-	bundleName := fmt.Sprintf("%s-bundle", shard.Name)
-	bundle := &operatorv1alpha1.Bundle{}
-	err := client.Get(ctx, types.NamespacedName{
-		Namespace: namespace.Name,
-		Name:      bundleName,
-	}, bundle)
-	if err == nil {
-		t.Fatal("Bundle should not exist before annotation is added")
-	}
-
-	// add bundle annotation to the shard
-	t.Log("Adding bundle annotation to Shard...")
-	if err := client.Get(ctx, types.NamespacedName{
-		Namespace: namespace.Name,
-		Name:      shard.Name,
-	}, &shard); err != nil {
-		t.Fatal(err)
-	}
-
-	if shard.Annotations == nil {
-		shard.Annotations = make(map[string]string)
-	}
-	shard.Annotations[resources.BundleAnnotation] = "true"
-
-	if err := client.Update(ctx, &shard); err != nil {
-		t.Fatalf("Failed to update shard with bundle annotation: %v", err)
-	}
-
-	// wait for bundle to be created
-	t.Log("Waiting for Bundle to be created...")
-	utils.WaitForObject(t, ctx, client, bundle, types.NamespacedName{
-		Namespace: namespace.Name,
-		Name:      bundleName,
-	})
-
-	// verify bundle was created
-	if err := client.Get(ctx, types.NamespacedName{
-		Namespace: namespace.Name,
-		Name:      bundleName,
-	}, bundle); err != nil {
-		t.Fatalf("Failed to get bundle: %v", err)
-	}
-
-	// verify bundle has the correct target
-	if bundle.Spec.Target.ShardRef == nil || bundle.Spec.Target.ShardRef.Name != shard.Name {
-		t.Errorf("Bundle target should reference shard %s, got %+v", shard.Name, bundle.Spec.Target)
-	}
-	t.Log("Successfully verified Bundle was created with correct target")
-
-	// wait for bundle to become ready and have all objects
-	// Note: Shard without CABundleSecretRef has 16 objects (no merged CA bundle)
-	expectedObjects := 16
-	t.Logf("Waiting for Bundle to become Ready with all %d objects...", expectedObjects)
-	timeout := time.After(3 * time.Minute)
-	ticker := time.NewTicker(5 * time.Second)
-
-	for {
-		select {
-		case <-timeout:
-			t.Fatalf("Timeout waiting for bundle to become Ready. Current state: %s, objects: %d/%d, conditions: %+v",
-				bundle.Status.State, len(bundle.Status.Objects), expectedObjects, bundle.Status.Conditions)
-		case <-ticker.C:
-			if err := client.Get(ctx, types.NamespacedName{
-				Namespace: namespace.Name,
-				Name:      bundleName,
-			}, bundle); err != nil {
-				t.Fatalf("Failed to get bundle: %v", err)
-			}
-
-			t.Logf("Bundle status: %s, objects: %d/%d", bundle.Status.State, len(bundle.Status.Objects), expectedObjects)
-
-			// Count ready objects
-			readyCount := 0
-			for _, obj := range bundle.Status.Objects {
-				if obj.State == operatorv1alpha1.BundleObjectStateReady {
-					readyCount++
-				} else {
-					t.Logf("Object %s is not ready: %s", obj.Object, obj.Message)
-				}
-			}
-
-			// Check if we have expected number of objects and all are ready
-			if bundle.Status.State == operatorv1alpha1.BundleStateReady &&
-				len(bundle.Status.Objects) == expectedObjects &&
-				readyCount == expectedObjects {
-				t.Logf("Bundle is Ready with all %d objects!", expectedObjects)
-				goto bundleReady
-			}
-
-			// Log current status
-			if len(bundle.Status.Objects) > 0 {
-				t.Logf("Ready objects: %d/%d", readyCount, expectedObjects)
-			}
-		}
-	}
-
-bundleReady:
-	// verify we have exactly the expected number of objects
-	if len(bundle.Status.Objects) != expectedObjects {
-		t.Errorf("Expected %d objects in bundle, got %d", expectedObjects, len(bundle.Status.Objects))
-		for i, obj := range bundle.Status.Objects {
-			t.Logf("Object %d: %s (state: %s)", i+1, obj.Object, obj.State)
-		}
-	}
-
-	// verify all objects are ready
-	for _, obj := range bundle.Status.Objects {
-		if obj.State != operatorv1alpha1.BundleObjectStateReady {
-			t.Errorf("Object %s is not ready: %s", obj.Object, obj.Message)
-		}
-	}
-
-	// verify specific expected objects exist
-	expectedObjectsList := []string{
-		// CA certificates from RootShard (5 objects)
-		fmt.Sprintf("secrets.core.v1:%s/%s-requestheader-client-ca", namespace.Name, rootShard.Name),
-		fmt.Sprintf("secrets.core.v1:%s/%s-server-ca", namespace.Name, rootShard.Name),
-		fmt.Sprintf("secrets.core.v1:%s/%s-ca", namespace.Name, rootShard.Name),
-		fmt.Sprintf("secrets.core.v1:%s/%s-client-ca", namespace.Name, rootShard.Name),
-		fmt.Sprintf("secrets.core.v1:%s/%s-service-account-ca", namespace.Name, rootShard.Name),
-
-		// Shard-specific certificates and secrets (9 objects)
-		fmt.Sprintf("secrets.core.v1:%s/%s-logical-cluster-admin", namespace.Name, shard.Name),
-		fmt.Sprintf("secrets.core.v1:%s/%s-logical-cluster-admin-kubeconfig", namespace.Name, shard.Name),
-		fmt.Sprintf("secrets.core.v1:%s/%s-client-kubeconfig", namespace.Name, shard.Name),
-		fmt.Sprintf("secrets.core.v1:%s/%s-external-logical-cluster-admin", namespace.Name, shard.Name),
-		fmt.Sprintf("secrets.core.v1:%s/%s-external-logical-cluster-admin-kubeconfig", namespace.Name, shard.Name),
-		fmt.Sprintf("secrets.core.v1:%s/%s-virtual-workspaces", namespace.Name, shard.Name),
-		fmt.Sprintf("secrets.core.v1:%s/%s-client", namespace.Name, shard.Name),
-		fmt.Sprintf("secrets.core.v1:%s/%s-server", namespace.Name, shard.Name),
-		fmt.Sprintf("secrets.core.v1:%s/%s-service-account", namespace.Name, shard.Name),
-
-		// Deployment (1 object)
-		fmt.Sprintf("deployments.apps.v1:%s/%s-shard-kcp", namespace.Name, shard.Name),
-
-		// Service (1 object)
-		fmt.Sprintf("services.core.v1:%s/%s-shard-kcp", namespace.Name, shard.Name),
-	}
-
-	t.Log("Verifying all expected objects are present in bundle...")
-	foundObjects := make(map[string]bool)
-	for _, obj := range bundle.Status.Objects {
-		foundObjects[obj.Object] = true
-	}
-
-	missingObjects := []string{}
-	for _, expected := range expectedObjectsList {
-		if !foundObjects[expected] {
-			missingObjects = append(missingObjects, expected)
-		}
-	}
-
-	if len(missingObjects) > 0 {
-		t.Errorf("Missing expected objects in bundle:")
-		for _, missing := range missingObjects {
-			t.Errorf("  - %s", missing)
-		}
-		t.Log("Actual objects in bundle:")
-		for _, obj := range bundle.Status.Objects {
-			t.Logf("  - %s", obj.Object)
-		}
-	}
-
-	t.Logf("Successfully verified Bundle has exactly %d objects, all in Ready state", expectedObjects)
 }

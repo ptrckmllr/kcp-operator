@@ -49,6 +49,33 @@ type VirtualWorkspaceSpec struct {
 	// If not specified, kcp's own virtual-workspace server will be deployed.
 	Image *ImageSpec `json:"image,omitempty"`
 
+	// Optional: Command overrides the entrypoint of the server container. Set this when the
+	// image is not kcp's own virtual-workspace server, whose binary lives at
+	// `/virtual-workspaces`.
+	//
+	// Setting this also changes which command line arguments the operator generates: only the
+	// arguments any aggregated apiserver understands are passed (TLS serving certificate,
+	// client and requestheader CA configuration, bind address and port, and `--kubeconfig`).
+	// The arguments only kcp's own server accepts (`--shard-external-url` and
+	// `--cache-kubeconfig`) are omitted, as is the cache server's kubeconfig mount, because a
+	// custom server would reject the unknown flags and refuse to start. Use ExtraArgs for
+	// whatever else the custom server needs.
+	//
+	// +optional
+	Command []string `json:"command,omitempty"`
+
+	// Optional: InitContainers are run in order before the server container starts. They are
+	// meant for the bootstrapping a custom virtual workspace has to perform against kcp before
+	// it can serve, like creating its own workspace and installing its APIExport.
+	//
+	// Each init container inherits the server container's volume mounts, so it can reach the
+	// same certificates without having to know the operator's mount paths.
+	//
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	InitContainers []VirtualWorkspaceInitContainer `json:"initContainers,omitempty"`
+
 	// Replicas configures how many instances of this server run in parallel.
 	// Defaults to 2 if not set.
 	Replicas *int32 `json:"replicas,omitempty"`
@@ -86,8 +113,41 @@ type VirtualWorkspaceSpec struct {
 	// +optional
 	ClientCABundleRef *corev1.LocalObjectReference `json:"clientCABundleRef,omitempty"`
 
+	// KubeconfigSecretRef references a v1.Secret containing a `kubeconfig` key that the server
+	// container uses to connect to kcp, mounted at `/etc/kcp/server-kubeconfig/kubeconfig`. When
+	// set, the server's `--kubeconfig` points at it instead of the target's logical-cluster-admin
+	// kubeconfig, which is what lets a server run with an identity other than the broadly
+	// privileged one the operator provisions by default.
+	//
+	// Init containers are unaffected and select their own credentials, see the init container's
+	// own KubeconfigSecretRef.
+	//
+	// The Secret is usually produced by a Kubeconfig object, whose kubeconfig is self-contained
+	// (the client certificate, key and CA are embedded) and already scoped to
+	// spec.targetWorkspace.
+	//
+	// +optional
+	KubeconfigSecretRef *corev1.LocalObjectReference `json:"kubeconfigSecretRef,omitempty"`
+
 	// Optional: ExtraArgs defines additional command line arguments to pass to the server container.
 	ExtraArgs []string `json:"extraArgs,omitempty"`
+
+	// Optional: ExtraVolumes defines additional volumes that should be added to the virtual workspace Pod.
+	//
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	ExtraVolumes []corev1.Volume `json:"extraVolumes,omitempty"`
+
+	// Optional: ExtraVolumeMounts defines additional volume mounts that should be added to the
+	// virtual workspace server container. Each entry's `name` must match the `name` of a volume
+	// defined in ExtraVolumes (or one of the volumes the operator manages). Init containers do not
+	// inherit these; they carry their own VolumeMounts.
+	//
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	ExtraVolumeMounts []corev1.VolumeMount `json:"extraVolumeMounts,omitempty"`
 
 	// Optional: Logging configures the logging settings for the server.
 	Logging *LoggingSpec `json:"logging,omitempty"`
@@ -96,6 +156,62 @@ type VirtualWorkspaceSpec struct {
 	//
 	// +optional
 	ClusterDomain string `json:"clusterDomain,omitempty"`
+}
+
+// VirtualWorkspaceInitContainer describes a container that runs to completion before the virtual
+// workspace server container is started.
+type VirtualWorkspaceInitContainer struct {
+	// Name of the init container. Must be unique within the VirtualWorkspace.
+	//
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// Optional: Image overwrites the container image used for this init container. If not
+	// specified, the same image as the server container is used, which is the common case for
+	// servers that ship their bootstrapping binary alongside the server binary.
+	Image *ImageSpec `json:"image,omitempty"`
+
+	// Optional: Command overrides the entrypoint of the init container image.
+	Command []string `json:"command,omitempty"`
+
+	// Optional: Args are the command line arguments passed to the init container.
+	Args []string `json:"args,omitempty"`
+
+	// KubeconfigSecretRef references a v1.Secret containing a `kubeconfig` key, mounted into this
+	// init container at `/etc/kcp/init-kubeconfig/kubeconfig`.
+	//
+	// Bootstrapping usually has to work across the workspace tree, which only resolves through
+	// the front-proxy, and needs administrative rights the server itself should not hold. Both
+	// are covered by pointing this at a Kubeconfig object that targets a FrontProxy with the
+	// `kcp-admin` username in the `system:kcp:admin` group.
+	//
+	// +optional
+	KubeconfigSecretRef *corev1.LocalObjectReference `json:"kubeconfigSecretRef,omitempty"`
+
+	// Optional: Resources overrides the resource requests and limits, which default to the same
+	// values the server container uses.
+	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// Optional: Volumes are added to the virtual workspace Pod for this init container's benefit.
+	// Volumes are pod-scoped, so declaring one here makes it mountable by every container, but it
+	// is only mounted into this init container. If the same volume name is declared more than once
+	// across the VirtualWorkspace and its init containers, the first declaration wins.
+	//
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	Volumes []corev1.Volume `json:"volumes,omitempty"`
+
+	// Optional: VolumeMounts are mounted into this init container alone; they are not applied to
+	// the server container or to any other init container. Each mount must reference a volume
+	// defined in this init container's Volumes, in the VirtualWorkspace's ExtraVolumes, or one of
+	// the volumes the operator manages. The certificates and kubeconfigs the operator mounts into
+	// every container are added on top of these.
+	//
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	VolumeMounts []corev1.VolumeMount `json:"volumeMounts,omitempty"`
 }
 
 // VirtualWorkspaceTarget configures which shard or root shard a virtual workspace is connected to.

@@ -27,19 +27,24 @@ import (
 // VirtualWorkspaceSpecApplyConfiguration represents a declarative configuration of the VirtualWorkspaceSpec type for use
 // with apply.
 type VirtualWorkspaceSpecApplyConfiguration struct {
-	Target               *VirtualWorkspaceTargetApplyConfiguration `json:"target,omitempty"`
-	External             *ExternalConfigApplyConfiguration         `json:"external,omitempty"`
-	Image                *ImageSpecApplyConfiguration              `json:"image,omitempty"`
-	Replicas             *int32                                    `json:"replicas,omitempty"`
-	Resources            *v1.ResourceRequirements                  `json:"resources,omitempty"`
-	CertificateTemplates *operatorv1alpha1.CertificateTemplateMap  `json:"certificateTemplates,omitempty"`
-	ServiceTemplate      *ServiceTemplateApplyConfiguration        `json:"serviceTemplate,omitempty"`
-	DeploymentTemplate   *DeploymentTemplateApplyConfiguration     `json:"deploymentTemplate,omitempty"`
-	CABundleSecretRef    *v1.LocalObjectReference                  `json:"caBundleSecretRef,omitempty"`
-	ClientCABundleRef    *v1.LocalObjectReference                  `json:"clientCABundleRef,omitempty"`
-	ExtraArgs            []string                                  `json:"extraArgs,omitempty"`
-	Logging              *LoggingSpecApplyConfiguration            `json:"logging,omitempty"`
-	ClusterDomain        *string                                   `json:"clusterDomain,omitempty"`
+	Target               *VirtualWorkspaceTargetApplyConfiguration         `json:"target,omitempty"`
+	External             *ExternalConfigApplyConfiguration                 `json:"external,omitempty"`
+	Image                *ImageSpecApplyConfiguration                      `json:"image,omitempty"`
+	Command              []string                                          `json:"command,omitempty"`
+	InitContainers       []VirtualWorkspaceInitContainerApplyConfiguration `json:"initContainers,omitempty"`
+	Replicas             *int32                                            `json:"replicas,omitempty"`
+	Resources            *v1.ResourceRequirements                          `json:"resources,omitempty"`
+	CertificateTemplates *operatorv1alpha1.CertificateTemplateMap          `json:"certificateTemplates,omitempty"`
+	ServiceTemplate      *ServiceTemplateApplyConfiguration                `json:"serviceTemplate,omitempty"`
+	DeploymentTemplate   *DeploymentTemplateApplyConfiguration             `json:"deploymentTemplate,omitempty"`
+	CABundleSecretRef    *v1.LocalObjectReference                          `json:"caBundleSecretRef,omitempty"`
+	ClientCABundleRef    *v1.LocalObjectReference                          `json:"clientCABundleRef,omitempty"`
+	KubeconfigSecretRef  *v1.LocalObjectReference                          `json:"kubeconfigSecretRef,omitempty"`
+	ExtraArgs            []string                                          `json:"extraArgs,omitempty"`
+	ExtraVolumes         []v1.Volume                                       `json:"extraVolumes,omitempty"`
+	ExtraVolumeMounts    []v1.VolumeMount                                  `json:"extraVolumeMounts,omitempty"`
+	Logging              *LoggingSpecApplyConfiguration                    `json:"logging,omitempty"`
+	ClusterDomain        *string                                           `json:"clusterDomain,omitempty"`
 }
 
 // VirtualWorkspaceSpecApplyConfiguration constructs a declarative configuration of the VirtualWorkspaceSpec type for use with
@@ -69,6 +74,29 @@ func (b *VirtualWorkspaceSpecApplyConfiguration) WithExternal(value *ExternalCon
 // If called multiple times, the Image field is set to the value of the last call.
 func (b *VirtualWorkspaceSpecApplyConfiguration) WithImage(value *ImageSpecApplyConfiguration) *VirtualWorkspaceSpecApplyConfiguration {
 	b.Image = value
+	return b
+}
+
+// WithCommand adds the given value to the Command field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the Command field.
+func (b *VirtualWorkspaceSpecApplyConfiguration) WithCommand(values ...string) *VirtualWorkspaceSpecApplyConfiguration {
+	for i := range values {
+		b.Command = append(b.Command, values[i])
+	}
+	return b
+}
+
+// WithInitContainers adds the given value to the InitContainers field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the InitContainers field.
+func (b *VirtualWorkspaceSpecApplyConfiguration) WithInitContainers(values ...*VirtualWorkspaceInitContainerApplyConfiguration) *VirtualWorkspaceSpecApplyConfiguration {
+	for i := range values {
+		if values[i] == nil {
+			panic("nil value passed to WithInitContainers")
+		}
+		b.InitContainers = append(b.InitContainers, *values[i])
+	}
 	return b
 }
 
@@ -128,12 +156,40 @@ func (b *VirtualWorkspaceSpecApplyConfiguration) WithClientCABundleRef(value v1.
 	return b
 }
 
+// WithKubeconfigSecretRef sets the KubeconfigSecretRef field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the KubeconfigSecretRef field is set to the value of the last call.
+func (b *VirtualWorkspaceSpecApplyConfiguration) WithKubeconfigSecretRef(value v1.LocalObjectReference) *VirtualWorkspaceSpecApplyConfiguration {
+	b.KubeconfigSecretRef = &value
+	return b
+}
+
 // WithExtraArgs adds the given value to the ExtraArgs field in the declarative configuration
 // and returns the receiver, so that objects can be build by chaining "With" function invocations.
 // If called multiple times, values provided by each call will be appended to the ExtraArgs field.
 func (b *VirtualWorkspaceSpecApplyConfiguration) WithExtraArgs(values ...string) *VirtualWorkspaceSpecApplyConfiguration {
 	for i := range values {
 		b.ExtraArgs = append(b.ExtraArgs, values[i])
+	}
+	return b
+}
+
+// WithExtraVolumes adds the given value to the ExtraVolumes field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the ExtraVolumes field.
+func (b *VirtualWorkspaceSpecApplyConfiguration) WithExtraVolumes(values ...v1.Volume) *VirtualWorkspaceSpecApplyConfiguration {
+	for i := range values {
+		b.ExtraVolumes = append(b.ExtraVolumes, values[i])
+	}
+	return b
+}
+
+// WithExtraVolumeMounts adds the given value to the ExtraVolumeMounts field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the ExtraVolumeMounts field.
+func (b *VirtualWorkspaceSpecApplyConfiguration) WithExtraVolumeMounts(values ...v1.VolumeMount) *VirtualWorkspaceSpecApplyConfiguration {
+	for i := range values {
+		b.ExtraVolumeMounts = append(b.ExtraVolumeMounts, values[i])
 	}
 	return b
 }

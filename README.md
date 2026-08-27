@@ -21,12 +21,13 @@ The table below marks known support of a kcp version in kcp-operator versions.
 
 <!-- The same table is in docs/content/README.md, make sure to keep them in-sync. -->
 
-| kcp    | `main`             | 0.7.x              | 0.6.x              | 0.5.x              |
+| kcp    | `main`             | 0.8.x              | 0.7.x              | 0.6.x              |
 | ------ | ------------------ | ------------------ | ------------------ | ------------------ |
 | `main` | :warning:          | :question:         | :question:         | :question:         |
-| 0.31.x | :white_check_mark: | :white_check_mark: | :white_check_mark: | :question:         |
+| 0.32.x | :white_check_mark: | :white_check_mark: | :question:         | :question:         |
+| 0.31.x | :white_check_mark: | :white_check_mark: | :white_check_mark: | :white_check_mark: |
 | 0.30.x | :white_check_mark: | :white_check_mark: | :white_check_mark: | :white_check_mark: |
-| 0.29.x | :question:         | :question:         | :question:         | :white_check_mark: |
+| 0.29.x | :question:         | :question:         | :question:         | :question:         |
 
 [^1]: While we try to support kcp's `main` branch, this support is best effort and should not be used for deploying actual kcp instances.
 
@@ -36,9 +37,7 @@ kcp-operator supports Kubernetes-style feature gates to enable or disable experi
 
 ### Available Feature Gates
 
-| Feature | Default | Stage | Description |
-|---------|---------|-------|-------------|
-| `ConfigurationBundle` | `false` | Alpha | Enable the configuration bundle feature for managing bundled kcp configurations and resources |
+There are currently no feature gates defined.
 
 ### Usage
 
@@ -46,13 +45,11 @@ Enable feature gates when starting the operator:
 
 ```bash
 # Enable a single feature
-./operator --feature-gates=ConfigurationBundle=true
+./operator --feature-gates=SomeFeature=true
 
 # Enable multiple features
-./operator --feature-gates=ConfigurationBundle=true,AnotherFeature=true
+./operator --feature-gates=SomeFeature=true,AnotherFeature=true
 ```
-
-For more details on feature gates, see the [feature gates documentation](internal/config/README.md).
 
 ## Contributing
 

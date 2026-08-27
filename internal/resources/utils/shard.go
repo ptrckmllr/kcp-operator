@@ -26,6 +26,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	"github.com/kcp-dev/kcp-operator/internal/resources"
+	deployv1alpha1 "github.com/kcp-dev/kcp-operator/sdk/apis/deploy/v1alpha1"
 	operatorv1alpha1 "github.com/kcp-dev/kcp-operator/sdk/apis/operator/v1alpha1"
 )
 
@@ -37,7 +38,15 @@ func GetShardBatteries(shard *operatorv1alpha1.Shard) []string {
 	return getCommonShardBatteries()
 }
 
+func GetCompiledShardBatteries(shard *deployv1alpha1.CompiledShard) []string {
+	return getCommonShardBatteries()
+}
+
 func GetRootShardBatteries(rootShard *operatorv1alpha1.RootShard) []string {
+	return getCommonShardBatteries()
+}
+
+func GetCompiledRootShardBatteries(rootShard *deployv1alpha1.CompiledRootShard) []string {
 	return getCommonShardBatteries()
 }
 
@@ -148,6 +157,25 @@ func ApplyCommonShardConfig(deployment *appsv1.Deployment, spec *operatorv1alpha
 	deployment = applyEtcdConfiguration(deployment, spec.Etcd)
 	deployment = applyAuditConfiguration(deployment, spec.Audit)
 	deployment = applyAuthorizationConfiguration(deployment, spec.Authorization)
+	deployment = applyExtraVolumes(deployment, spec.ExtraVolumes, spec.ExtraVolumeMounts)
+
+	return deployment
+}
+
+// applyExtraVolumes appends user-configured extra volumes and volume mounts to the
+// shard container, e.g. to mount an EncryptionConfiguration Secret referenced by an
+// `--encryption-provider-config` flag set via ExtraArgs.
+func applyExtraVolumes(deployment *appsv1.Deployment, volumes []corev1.Volume, volumeMounts []corev1.VolumeMount) *appsv1.Deployment {
+	if len(volumes) == 0 && len(volumeMounts) == 0 {
+		return deployment
+	}
+
+	podSpec := deployment.Spec.Template.Spec
+
+	podSpec.Volumes = append(podSpec.Volumes, volumes...)
+	podSpec.Containers[0].VolumeMounts = append(podSpec.Containers[0].VolumeMounts, volumeMounts...)
+
+	deployment.Spec.Template.Spec = podSpec
 
 	return deployment
 }
@@ -159,6 +187,13 @@ func applyEtcdConfiguration(deployment *appsv1.Deployment, config operatorv1alph
 		podSpec.Containers[0].Args,
 		fmt.Sprintf("--etcd-servers=%s", strings.Join(config.Endpoints, ",")),
 	)
+
+	if config.Prefix != "" {
+		podSpec.Containers[0].Args = append(
+			podSpec.Containers[0].Args,
+			fmt.Sprintf("--etcd-prefix=%s", config.Prefix),
+		)
+	}
 
 	if config.TLSConfig != nil {
 		volumeName := "etcd-client-cert"

@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/tools/cache"
 
+	deployv1alpha1 "github.com/kcp-dev/kcp-operator/sdk/apis/deploy/v1alpha1"
 	operatorv1alpha1 "github.com/kcp-dev/kcp-operator/sdk/apis/operator/v1alpha1"
 )
 
@@ -86,9 +87,18 @@ func (f *genericInformer) Lister() cache.GenericLister {
 // TODO extend this to unknown resources with a client pool
 func (f *sharedInformerFactory) ForResource(resource schema.GroupVersionResource) (GenericClusterInformer, error) {
 	switch resource {
+	// Group=deploy.operator.kcp.io, Version=V1alpha1
+	case deployv1alpha1.SchemeGroupVersion.WithResource("compiledcacheservers"):
+		return &genericClusterInformer{resource: resource.GroupResource(), informer: f.Deploy().V1alpha1().CompiledCacheServers().Informer()}, nil
+	case deployv1alpha1.SchemeGroupVersion.WithResource("compiledfrontproxies"):
+		return &genericClusterInformer{resource: resource.GroupResource(), informer: f.Deploy().V1alpha1().CompiledFrontProxies().Informer()}, nil
+	case deployv1alpha1.SchemeGroupVersion.WithResource("compiledrootshards"):
+		return &genericClusterInformer{resource: resource.GroupResource(), informer: f.Deploy().V1alpha1().CompiledRootShards().Informer()}, nil
+	case deployv1alpha1.SchemeGroupVersion.WithResource("compiledshards"):
+		return &genericClusterInformer{resource: resource.GroupResource(), informer: f.Deploy().V1alpha1().CompiledShards().Informer()}, nil
+	case deployv1alpha1.SchemeGroupVersion.WithResource("compiledvirtualworkspaces"):
+		return &genericClusterInformer{resource: resource.GroupResource(), informer: f.Deploy().V1alpha1().CompiledVirtualWorkspaces().Informer()}, nil
 	// Group=operator.kcp.io, Version=V1alpha1
-	case operatorv1alpha1.SchemeGroupVersion.WithResource("bundles"):
-		return &genericClusterInformer{resource: resource.GroupResource(), informer: f.Operator().V1alpha1().Bundles().Informer()}, nil
 	case operatorv1alpha1.SchemeGroupVersion.WithResource("cacheservers"):
 		return &genericClusterInformer{resource: resource.GroupResource(), informer: f.Operator().V1alpha1().CacheServers().Informer()}, nil
 	case operatorv1alpha1.SchemeGroupVersion.WithResource("frontproxies"):
@@ -110,10 +120,23 @@ func (f *sharedInformerFactory) ForResource(resource schema.GroupVersionResource
 // TODO extend this to unknown resources with a client pool
 func (f *sharedScopedInformerFactory) ForResource(resource schema.GroupVersionResource) (GenericInformer, error) {
 	switch resource {
-	// Group=operator.kcp.io, Version=V1alpha1
-	case operatorv1alpha1.SchemeGroupVersion.WithResource("bundles"):
-		informer := f.Operator().V1alpha1().Bundles().Informer()
+	// Group=deploy.operator.kcp.io, Version=V1alpha1
+	case deployv1alpha1.SchemeGroupVersion.WithResource("compiledcacheservers"):
+		informer := f.Deploy().V1alpha1().CompiledCacheServers().Informer()
 		return &genericInformer{lister: cache.NewGenericLister(informer.GetIndexer(), resource.GroupResource()), informer: informer}, nil
+	case deployv1alpha1.SchemeGroupVersion.WithResource("compiledfrontproxies"):
+		informer := f.Deploy().V1alpha1().CompiledFrontProxies().Informer()
+		return &genericInformer{lister: cache.NewGenericLister(informer.GetIndexer(), resource.GroupResource()), informer: informer}, nil
+	case deployv1alpha1.SchemeGroupVersion.WithResource("compiledrootshards"):
+		informer := f.Deploy().V1alpha1().CompiledRootShards().Informer()
+		return &genericInformer{lister: cache.NewGenericLister(informer.GetIndexer(), resource.GroupResource()), informer: informer}, nil
+	case deployv1alpha1.SchemeGroupVersion.WithResource("compiledshards"):
+		informer := f.Deploy().V1alpha1().CompiledShards().Informer()
+		return &genericInformer{lister: cache.NewGenericLister(informer.GetIndexer(), resource.GroupResource()), informer: informer}, nil
+	case deployv1alpha1.SchemeGroupVersion.WithResource("compiledvirtualworkspaces"):
+		informer := f.Deploy().V1alpha1().CompiledVirtualWorkspaces().Informer()
+		return &genericInformer{lister: cache.NewGenericLister(informer.GetIndexer(), resource.GroupResource()), informer: informer}, nil
+	// Group=operator.kcp.io, Version=V1alpha1
 	case operatorv1alpha1.SchemeGroupVersion.WithResource("cacheservers"):
 		informer := f.Operator().V1alpha1().CacheServers().Informer()
 		return &genericInformer{lister: cache.NewGenericLister(informer.GetIndexer(), resource.GroupResource()), informer: informer}, nil
